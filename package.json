@@ -1,0 +1,50 @@
+{
+  "name": "@heznpc/anvil",
+  "version": "0.1.0",
+  "description": "Atomic workflow recipes for Claude Code. One MCP tool call runs the whole commit → push → PR → CI-wait → merge pipeline.",
+  "type": "module",
+  "bin": {
+    "anvil": "./dist/bin.js"
+  },
+  "files": [
+    "dist/",
+    "examples/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/bin.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "execa": "^9.5.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "claude-code",
+    "mcp",
+    "workflow",
+    "git",
+    "automation",
+    "ci-cd"
+  ],
+  "author": "heznpc",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/heznpc/anvil.git"
+  },
+  "bugs": {
+    "url": "https://github.com/heznpc/anvil/issues"
+  },
+  "homepage": "https://github.com/heznpc/anvil#readme"
+}
