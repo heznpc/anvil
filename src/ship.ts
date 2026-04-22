@@ -91,26 +91,31 @@ export async function ship(args: ShipArgs): Promise<string> {
 }
 
 async function waitForChecksToRegister(): Promise<boolean> {
-  // Poll up to 30s for CI to register on the PR. Returns true once at least
-  // one check appears, false if the repo has no CI configured at all.
-  const maxAttempts = 6;
+  // PRs take a moment to index on GitHub after `gh pr create`, and CI
+  // takes additional time to register checks. Poll up to 45s. Returns
+  // true if checks appear, false if the final attempt confirms no CI at
+  // all. Tolerates transient gh failures during the window.
+  const maxAttempts = 9;
   const intervalMs = 5000;
+  await new Promise((r) => setTimeout(r, 3000));
+
+  let lastResult: { exitCode?: number; stdout?: string; stderr?: string } = {};
   for (let i = 0; i < maxAttempts; i++) {
     const result = await execa("gh", ["pr", "checks"], { reject: false });
+    lastResult = result;
     if (result.exitCode === 0 && result.stdout.trim()) return true;
-    // gh exits 1 with this stderr on PRs that have no checks yet OR no CI at all.
-    if (
-      result.exitCode === 1 &&
-      /no checks reported/i.test(result.stderr ?? "")
-    ) {
-      if (i === maxAttempts - 1) return false;
+    // On non-final attempts, any failure (no checks, transient API, PR not
+    // yet indexed) simply waits and retries.
+    if (i < maxAttempts - 1) {
       await new Promise((r) => setTimeout(r, intervalMs));
       continue;
     }
-    // Other errors — bubble up
-    throw new Error(
-      `gh pr checks failed: ${result.stderr ?? result.stdout ?? "unknown"}`
-    );
+    // Final attempt: "no checks reported" = the repo has no CI; anything
+    // else = something genuinely wrong.
+    if (/no checks reported/i.test(result.stderr ?? "")) return false;
   }
-  return false;
+  const msg = lastResult.stderr || lastResult.stdout || "no output";
+  throw new Error(
+    `gh pr checks never produced a result after ${maxAttempts} attempts: ${msg.trim()}`
+  );
 }
