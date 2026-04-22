@@ -1,5 +1,17 @@
 import { execa } from "execa";
 
+// How long to give GitHub to register CI checks after `gh pr create`.
+// Longer than strictly needed for a typical repo, but the cost of waiting
+// is wall time, and the cost of not waiting is a false "no CI" classification
+// that merges before the check can vote.
+const CHECK_INITIAL_DELAY_MS = 3000;
+const CHECK_POLL_INTERVAL_MS = 5000;
+const CHECK_POLL_MAX_ATTEMPTS = 9;
+// After this many "no checks reported" responses in a row, conclude the repo
+// genuinely has no CI and skip the wait. Earlier iterations could be catching
+// a racing PR indexing window rather than a CI-less repo.
+const CHECK_EARLY_EXIT_AFTER = 2;
+
 export interface ShipArgs {
   message: string;
   branch?: string;
@@ -91,31 +103,26 @@ export async function ship(args: ShipArgs): Promise<string> {
 }
 
 async function waitForChecksToRegister(): Promise<boolean> {
-  // PRs take a moment to index on GitHub after `gh pr create`, and CI
-  // takes additional time to register checks. Poll up to 45s. Returns
-  // true if checks appear, false if the final attempt confirms no CI at
-  // all. Tolerates transient gh failures during the window.
-  const maxAttempts = 9;
-  const intervalMs = 5000;
-  await new Promise((r) => setTimeout(r, 3000));
+  await new Promise((r) => setTimeout(r, CHECK_INITIAL_DELAY_MS));
 
   let lastResult: { exitCode?: number; stdout?: string; stderr?: string } = {};
-  for (let i = 0; i < maxAttempts; i++) {
+  let noChecksStreak = 0;
+  for (let i = 0; i < CHECK_POLL_MAX_ATTEMPTS; i++) {
     const result = await execa("gh", ["pr", "checks"], { reject: false });
     lastResult = result;
     if (result.exitCode === 0 && result.stdout.trim()) return true;
-    // On non-final attempts, any failure (no checks, transient API, PR not
-    // yet indexed) simply waits and retries.
-    if (i < maxAttempts - 1) {
-      await new Promise((r) => setTimeout(r, intervalMs));
-      continue;
+    if (/no checks reported/i.test(result.stderr ?? "")) {
+      noChecksStreak++;
+      if (noChecksStreak >= CHECK_EARLY_EXIT_AFTER) return false;
+    } else {
+      noChecksStreak = 0;
     }
-    // Final attempt: "no checks reported" = the repo has no CI; anything
-    // else = something genuinely wrong.
-    if (/no checks reported/i.test(result.stderr ?? "")) return false;
+    if (i < CHECK_POLL_MAX_ATTEMPTS - 1) {
+      await new Promise((r) => setTimeout(r, CHECK_POLL_INTERVAL_MS));
+    }
   }
   const msg = lastResult.stderr || lastResult.stdout || "no output";
   throw new Error(
-    `gh pr checks never produced a result after ${maxAttempts} attempts: ${msg.trim()}`
+    `gh pr checks never produced a result after ${CHECK_POLL_MAX_ATTEMPTS} attempts: ${msg.trim()}`
   );
 }
