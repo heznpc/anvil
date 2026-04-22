@@ -1,6 +1,6 @@
 {
   "name": "@heznpc/anvil",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Atomic workflow recipes for Claude Code. One MCP tool call runs the whole commit → push → PR → CI-wait → merge pipeline.",
   "type": "module",
   "bin": {
