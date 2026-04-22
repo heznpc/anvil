@@ -66,8 +66,16 @@ export async function ship(args: ShipArgs): Promise<string> {
       "Shipped via anvil.",
     ]);
 
-    step("gh pr checks --watch");
-    await execa("gh", ["pr", "checks", "--watch"]);
+    // Wait for CI to register before calling --watch. Otherwise gh exits 1
+    // with "no checks reported" on a brand-new PR and the pipeline dies
+    // even though CI is about to start.
+    const hasChecks = await waitForChecksToRegister();
+    if (hasChecks) {
+      step("gh pr checks --watch");
+      await execa("gh", ["pr", "checks", "--watch"]);
+    } else {
+      step("(no CI configured on this repo — skipping check wait)");
+    }
 
     step(`gh pr merge --${strategy} --delete-branch`);
     await execa("gh", ["pr", "merge", `--${strategy}`, "--delete-branch"]);
@@ -80,4 +88,29 @@ export async function ship(args: ShipArgs): Promise<string> {
     if (err.stderr) log.push(`stderr: ${err.stderr}`);
     throw new Error(log.join("\n"));
   }
+}
+
+async function waitForChecksToRegister(): Promise<boolean> {
+  // Poll up to 30s for CI to register on the PR. Returns true once at least
+  // one check appears, false if the repo has no CI configured at all.
+  const maxAttempts = 6;
+  const intervalMs = 5000;
+  for (let i = 0; i < maxAttempts; i++) {
+    const result = await execa("gh", ["pr", "checks"], { reject: false });
+    if (result.exitCode === 0 && result.stdout.trim()) return true;
+    // gh exits 1 with this stderr on PRs that have no checks yet OR no CI at all.
+    if (
+      result.exitCode === 1 &&
+      /no checks reported/i.test(result.stderr ?? "")
+    ) {
+      if (i === maxAttempts - 1) return false;
+      await new Promise((r) => setTimeout(r, intervalMs));
+      continue;
+    }
+    // Other errors — bubble up
+    throw new Error(
+      `gh pr checks failed: ${result.stderr ?? result.stdout ?? "unknown"}`
+    );
+  }
+  return false;
 }
